@@ -48,7 +48,7 @@ jobs:
         run: pnpm exec electron-builder build --win --publish never
 
       - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: chatbox-windows
           path: |

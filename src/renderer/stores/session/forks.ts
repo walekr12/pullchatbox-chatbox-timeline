@@ -62,6 +62,25 @@ export async function switchFork(sessionId: string, forkMessageId: string, direc
 }
 
 /**
+ * Switch to a specific fork branch.
+ */
+export async function switchForkToPosition(sessionId: string, forkMessageId: string, position: number) {
+  await chatStore.updateSessionWithMessages(sessionId, (session) => {
+    if (!session) {
+      throw new Error('Session not found')
+    }
+    const patch = buildSwitchForkToPositionPatch(session, forkMessageId, position)
+    if (!patch) {
+      return session
+    }
+    return {
+      ...session,
+      ...patch,
+    } as typeof session
+  })
+}
+
+/**
  * Delete the current fork branch
  */
 export async function deleteFork(sessionId: string, forkMessageId: string) {
@@ -117,7 +136,32 @@ function buildSwitchForkPatch(
     return null
   }
 
-  const rootResult = switchForkInMessages(session.messages, forkEntry, forkMessageId, direction)
+  const targetPosition =
+    direction === 'next'
+      ? (forkEntry.position + 1) % forkEntry.lists.length
+      : (forkEntry.position - 1 + forkEntry.lists.length) % forkEntry.lists.length
+  return buildSwitchForkToPositionPatch(session, forkMessageId, targetPosition)
+}
+
+function buildSwitchForkToPositionPatch(
+  session: Session,
+  forkMessageId: string,
+  targetPosition: number
+): Partial<Session> | null {
+  const { messageForksHash } = session
+  if (!messageForksHash) {
+    return null
+  }
+
+  const forkEntry = messageForksHash[forkMessageId]
+  if (!forkEntry || forkEntry.lists.length <= 1 || targetPosition < 0 || targetPosition >= forkEntry.lists.length) {
+    return null
+  }
+  if (targetPosition === forkEntry.position) {
+    return null
+  }
+
+  const rootResult = switchForkInMessages(session.messages, forkEntry, forkMessageId, targetPosition)
   if (rootResult) {
     const { messages, fork } = rootResult
     return {
@@ -136,7 +180,7 @@ function buildSwitchForkPatch(
     if (forkWasProcessed) {
       return thread
     }
-    const result = switchForkInMessages(thread.messages, forkEntry, forkMessageId, direction)
+    const result = switchForkInMessages(thread.messages, forkEntry, forkMessageId, targetPosition)
     if (!result) {
       return thread
     }
@@ -162,7 +206,7 @@ function switchForkInMessages(
   messages: Message[],
   forkEntry: MessageForkEntry,
   forkMessageId: string,
-  direction: 'next' | 'prev'
+  targetPosition: number
 ): { messages: Message[]; fork: MessageForkEntry | null } | null {
   const forkMessageIndex = messages.findIndex((m) => m.id === forkMessageId)
   if (forkMessageIndex < 0) {
@@ -193,9 +237,7 @@ function switchForkInMessages(
     adjustedCurrentPosition = currentPosition >= updatedLists.length ? updatedLists.length - 1 : currentPosition
   }
 
-  const total = updatedLists.length
-  const newPosition =
-    direction === 'next' ? (adjustedCurrentPosition + 1) % total : (adjustedCurrentPosition - 1 + total) % total
+  const newPosition = targetPosition >= updatedLists.length ? updatedLists.length - 1 : targetPosition
 
   const branchMessages = updatedLists[newPosition]?.messages ?? []
 

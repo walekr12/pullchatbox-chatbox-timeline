@@ -259,6 +259,86 @@ describe('fork actions', () => {
     expect(snapshot.messageForksHash?.[pivot.id].lists[0].messages).toEqual([])
   })
 
+  test('switchForkToPosition jumps directly to a requested branch', async () => {
+    const pivot = makeMessage('pivot', 'user')
+    const current = makeMessage('current', 'assistant')
+    const altA = makeMessage('alt-a', 'assistant')
+    const altB = makeMessage('alt-b', 'assistant')
+    const session: Session = {
+      id: 'session-direct-switch',
+      name: 'Test',
+      messages: [pivot, current],
+      messageForksHash: {
+        [pivot.id]: {
+          position: 0,
+          lists: [
+            { id: 'list-0', messages: [] },
+            { id: 'list-1', messages: [altA] },
+            { id: 'list-2', messages: [altB] },
+          ],
+          createdAt: 1,
+        },
+      },
+    }
+    const snapshot = cloneSession(session)
+    let updated: Session | undefined
+
+    updateSessionWithMessages.mockImplementation(async (_, updater) => {
+      const result = updater(session)
+      updated = result as Session
+      return result
+    })
+
+    await sessionActions.switchForkToPosition(session.id, pivot.id, 2)
+
+    expect(session).toEqual(snapshot)
+    expect(updated).toBeDefined()
+    expect(updated!.messages).toEqual([pivot, altB])
+
+    const fork = updated!.messageForksHash?.[pivot.id]
+    expect(fork).toBeDefined()
+    expect(fork!.position).toBe(2)
+    expect(fork!.lists[0].messages).toEqual([current])
+    expect(fork!.lists[1].messages).toEqual([altA])
+    expect(fork!.lists[2].messages).toEqual([])
+  })
+
+  test('switchForkToPosition does not rewrite the current branch', async () => {
+    const pivot = makeMessage('pivot', 'user')
+    const current = makeMessage('current', 'assistant')
+    const alt = makeMessage('alt', 'assistant')
+    const session: Session = {
+      id: 'session-current-switch',
+      name: 'Test',
+      messages: [pivot, current],
+      messageForksHash: {
+        [pivot.id]: {
+          position: 0,
+          lists: [
+            { id: 'list-0', messages: [] },
+            { id: 'list-1', messages: [alt] },
+          ],
+          createdAt: 1,
+        },
+      },
+    }
+    const snapshot = cloneSession(session)
+    let updated: Session | undefined
+
+    updateSessionWithMessages.mockImplementation(async (_, updater) => {
+      const result = updater(session)
+      updated = result as Session
+      return result
+    })
+
+    await sessionActions.switchForkToPosition(session.id, pivot.id, 0)
+
+    expect(session).toEqual(snapshot)
+    expect(updated).toBe(session)
+    expect(updated!.messages).toEqual([pivot, current])
+    expect(updated!.messageForksHash?.[pivot.id].lists[0].messages).toEqual([])
+  })
+
   test('switchFork updates forked thread messages', async () => {
     const pivot = makeMessage('pivot', 'user')
     const current = makeMessage('current', 'assistant')

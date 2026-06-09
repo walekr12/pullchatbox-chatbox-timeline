@@ -136,6 +136,7 @@ export type InputBoxProps = {
   onStartNewThread?(): boolean
   onRollbackThread?(): boolean
   onClickSessionSettings?(): boolean | Promise<boolean>
+  leftExtraActions?: React.ReactNode
 }
 
 const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
@@ -152,6 +153,7 @@ const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
       onStartNewThread,
       onRollbackThread,
       onClickSessionSettings,
+      leftExtraActions,
     },
     ref
   ) => {
@@ -1164,6 +1166,8 @@ const InputBox = forwardRef<InputBoxRef, InputBoxProps>(
                     </UnstyledButton>
                   </Tooltip>
                 )}
+
+                {leftExtraActions}
 
                 {/* Mobile: Settings menu */}
                 {isSmallScreen && (

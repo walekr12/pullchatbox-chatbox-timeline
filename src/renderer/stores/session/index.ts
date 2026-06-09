@@ -28,8 +28,8 @@ export {
 } from './crud'
 // Export operations (1 function)
 export { exportSessionChat } from './export'
-// Fork operations (5 functions)
-export { createNewFork, deleteFork, expandFork, findMessageLocation, switchFork } from './forks'
+// Fork operations (6 functions)
+export { createNewFork, deleteFork, expandFork, findMessageLocation, switchFork, switchForkToPosition } from './forks'
 // Generation operations (8 functions)
 export {
   generate,

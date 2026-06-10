@@ -7,8 +7,9 @@ import {
   ChatboxAIAPIError,
   NetworkError,
 } from '@shared/models/errors'
-import { createMessage, type Message } from '@shared/types'
-import { countMessageWords } from '@shared/utils/message'
+import { createMessage, type Message, type Session } from '@shared/types'
+import { v4 as uuidv4 } from 'uuid'
+import { countMessageWords, getMessageText } from '@shared/utils/message'
 import { createModelDependencies } from '@/adapters'
 import { runCompactionWithUIState } from '@/packages/context-management'
 import { getModelDisplayName } from '@/packages/model-setting-utils'
@@ -77,9 +78,150 @@ export async function modifyMessage(
   updated.timestamp = Date.now()
   if (updateOnlyCache) {
     await chatStore.updateMessageCache(sessionId, updated.id, updated)
-  } else {
-    await chatStore.updateMessage(sessionId, updated.id, updated)
+    return
   }
+
+  const editForkPatch = buildUserEditForkPatch(session, updated)
+  if (editForkPatch) {
+    await chatStore.updateSessionWithMessages(sessionId, (currentSession) => {
+      if (!currentSession) {
+        return currentSession
+      }
+      return {
+        ...currentSession,
+        ...editForkPatch,
+      }
+    })
+    return
+  }
+
+  await chatStore.updateMessage(sessionId, updated.id, updated)
+}
+
+
+type UserEditForkResult = {
+  messages: Message[]
+  forkMessageId: string
+  forkEntry: NonNullable<Session['messageForksHash']>[string]
+}
+
+function buildUserEditForkPatch(session: Session, updated: Message): Partial<Session> | null {
+  const rootResult = buildUserEditForkResult(session, session.messages, updated)
+  if (rootResult) {
+    return {
+      messages: rootResult.messages,
+      messageForksHash: {
+        ...(session.messageForksHash ?? {}),
+        [rootResult.forkMessageId]: rootResult.forkEntry,
+      },
+    }
+  }
+
+  if (!session.threads?.length) {
+    return null
+  }
+
+  let editResult: UserEditForkResult | null = null
+  const threads = session.threads.map((thread) => {
+    if (editResult) {
+      return thread
+    }
+    const result = buildUserEditForkResult(session, thread.messages, updated)
+    if (!result) {
+      return thread
+    }
+    editResult = result
+    return {
+      ...thread,
+      messages: result.messages,
+    }
+  })
+
+  if (!editResult) {
+    return null
+  }
+
+  return {
+    threads,
+    messageForksHash: {
+      ...(session.messageForksHash ?? {}),
+      [editResult.forkMessageId]: editResult.forkEntry,
+    },
+  }
+}
+
+function buildUserEditForkResult(
+  session: Session,
+  messages: Message[],
+  updated: Message
+): UserEditForkResult | null {
+  if (updated.role !== 'user') {
+    return null
+  }
+
+  const editIndex = messages.findIndex((message) => message.id === updated.id)
+  if (editIndex <= 0) {
+    return null
+  }
+
+  const original = messages[editIndex]
+  if (original.role !== 'user' || !hasMessageContentChanged(original, updated)) {
+    return null
+  }
+
+  const forkMessageId = messages[editIndex - 1].id
+  const storedMessages = messages.slice(editIndex)
+  if (storedMessages.length === 0) {
+    return null
+  }
+
+  const existingFork = session.messageForksHash?.[forkMessageId]
+  const forkEntry = existingFork ?? {
+    position: 0,
+    lists: [
+      {
+        id: 'fork_list_' + uuidv4(),
+        messages: [],
+      },
+    ],
+    createdAt: Date.now(),
+  }
+
+  const storedListId = forkEntry.lists[forkEntry.position]?.id ?? 'fork_list_' + uuidv4()
+  const lists = forkEntry.lists.map((list, index) =>
+    index === forkEntry.position
+      ? {
+          id: storedListId,
+          messages: storedMessages,
+        }
+      : list
+  )
+  const nextPosition = lists.length
+
+  return {
+    messages: messages.slice(0, editIndex).concat(updated),
+    forkMessageId,
+    forkEntry: {
+      ...forkEntry,
+      position: nextPosition,
+      lists: [
+        ...lists,
+        {
+          id: 'fork_list_' + uuidv4(),
+          messages: [],
+        },
+      ],
+    },
+  }
+}
+
+function hasMessageContentChanged(original: Message, updated: Message) {
+  return (
+    getMessageText(original, true, false) !== getMessageText(updated, true, false) ||
+    JSON.stringify(original.files ?? []) !== JSON.stringify(updated.files ?? []) ||
+    JSON.stringify(original.links ?? []) !== JSON.stringify(updated.links ?? []) ||
+    JSON.stringify(original.contentParts ?? []) !== JSON.stringify(updated.contentParts ?? [])
+  )
 }
 
 /**

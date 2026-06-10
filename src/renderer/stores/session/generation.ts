@@ -61,6 +61,11 @@ export async function regenerateInNewFork(
     await generate(sessionId, msg, { operationType: 'regenerate' })
     return
   }
+  if (msg.role === 'user') {
+    await createNewFork(sessionId, msg.id)
+    return runGenerateMore(sessionId, msg.id)
+  }
+
   const previousMessageIndex = location.index - 1
   if (previousMessageIndex < 0) {
     // If target message is the first message, regenerate directly

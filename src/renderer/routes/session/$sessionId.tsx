@@ -11,7 +11,7 @@ import { ErrorBoundary } from '@/components/common/ErrorBoundary'
 import InputBox from '@/components/InputBox/InputBox'
 import Header from '@/components/layout/Header'
 import Page from '@/components/layout/Page'
-import RollTimelineDrawer from '@/components/session/RollTimelineDrawer'
+import ConversationBranchesDrawer from '@/components/session/ConversationBranchesDrawer'
 import ThreadHistoryDrawer from '@/components/session/ThreadHistoryDrawer'
 import * as remote from '@/packages/remote'
 import { updateSession as updateSessionStore, useSession } from '@/stores/chatStore'
@@ -32,7 +32,7 @@ function RouteComponent() {
   const setLastUsedChatModel = useStore(lastUsedModelStore, (state) => state.setChatModel)
   const setLastUsedPictureModel = useStore(lastUsedModelStore, (state) => state.setPictureModel)
 
-  const [showRollTimeline, setShowRollTimeline] = useState(false)
+  const [showConversationBranches, setShowConversationBranches] = useState(false)
   const currentMessageList = useMemo(() => (currentSession ? getAllMessageList(currentSession) : []), [currentSession])
   const lastGeneratingMessage = useMemo(
     () => currentMessageList.find((m: Message) => m.generating),
@@ -169,7 +169,7 @@ function RouteComponent() {
     }
   }, [currentSession?.settings?.provider, currentSession?.settings?.modelId])
 
-  const hasRollTimeline = !!currentSession?.messageForksHash && Object.keys(currentSession.messageForksHash).length > 0
+  const hasConversationBranches = !!currentSession?.messageForksHash && Object.keys(currentSession.messageForksHash).length > 0
 
   return currentSession ? (
     <div className="flex flex-col h-full">
@@ -193,23 +193,23 @@ function RouteComponent() {
           onSubmit={onSubmit}
           onStopGenerating={onStopGenerating}
           leftExtraActions={
-            <Tooltip label={t('Roll Timeline')} position="top" withArrow>
+            <Tooltip label={t('Conversation Branches')} position="top" withArrow>
               <UnstyledButton
-                onClick={() => setShowRollTimeline(true)}
-                disabled={!hasRollTimeline}
+                onClick={() => setShowConversationBranches(true)}
+                disabled={!hasConversationBranches}
                 className="flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-[var(--chatbox-background-tertiary)] transition-colors disabled:opacity-50"
               >
                 <IconGitBranch
                   size={18}
                   strokeWidth={1.8}
-                  className={hasRollTimeline ? 'text-[var(--chatbox-tint-brand)]' : 'text-[var(--chatbox-tint-secondary)]'}
+                  className={hasConversationBranches ? 'text-[var(--chatbox-tint-brand)]' : 'text-[var(--chatbox-tint-secondary)]'}
                 />
               </UnstyledButton>
             </Tooltip>
           }
         />
       </ErrorBoundary>
-      <RollTimelineDrawer session={currentSession} open={showRollTimeline} onClose={() => setShowRollTimeline(false)} />
+      <ConversationBranchesDrawer session={currentSession} open={showConversationBranches} onClose={() => setShowConversationBranches(false)} />
       <ThreadHistoryDrawer session={currentSession} />
     </div>
   ) : (

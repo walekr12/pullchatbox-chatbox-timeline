@@ -5,6 +5,44 @@ import type { ProviderSettings } from '../types'
  * These stubs keep the provider pipeline working without it.
  */
 
+export interface OAuthCredentials {
+  accessToken: string
+  refreshToken?: string
+  expiresAt?: number
+  extra?: Record<string, unknown>
+}
+
+export const OAuthIpcChannels = {
+  LOGIN: 'oauth:login',
+  START_LOGIN: 'oauth:start-login',
+  EXCHANGE_CODE: 'oauth:exchange-code',
+  START_DEVICE_FLOW: 'oauth:start-device-flow',
+  WAIT_DEVICE_TOKEN: 'oauth:wait-device-token',
+  CANCEL: 'oauth:cancel',
+  REFRESH: 'oauth:refresh',
+  GET_SUPPORTED_PROVIDERS: 'oauth:get-supported-providers',
+} as const
+
+export interface OAuthResult {
+  success: boolean
+  credentials?: OAuthCredentials
+  error?: string
+}
+
+export interface OAuthStartResult {
+  success: boolean
+  authUrl?: string
+  instructions?: string
+  error?: string
+}
+
+export interface DeviceFlowStartResult {
+  success: boolean
+  userCode?: string
+  verificationUri?: string
+  error?: string
+}
+
 export interface OAuthProviderInfo {
   providerId: string
   name: string
@@ -49,8 +87,8 @@ export function createOAuthCredentialManager(..._args: unknown[]): undefined {
   return undefined
 }
 
-// No-op OAuth fetch stubs — they are only called when `isOAuth && credentialManager` is truthy,
-// which never happens in the open-source edition. Returning undefined keeps the type contract.
+// No-op OAuth fetch stubs. They are only called when OAuth is enabled,
+// which never happens in the open-source edition.
 export function createBearerOAuthFetch(..._args: unknown[]): undefined {
   return undefined
 }

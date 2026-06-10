@@ -2,7 +2,7 @@ import { ActionIcon, Badge, Flex, ScrollArea, Text, Tooltip, UnstyledButton } fr
 import SwipeableDrawer from '@mui/material/SwipeableDrawer'
 import type { Message, Session } from '@shared/types'
 import { getMessageText } from '@shared/utils/message'
-import { IconGitBranch, IconMessage, IconX } from '@tabler/icons-react'
+import { IconGitBranch, IconX } from '@tabler/icons-react'
 import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import * as scrollActions from '@/stores/scrollActions'
@@ -14,17 +14,18 @@ import { ScalableIcon } from '../common/ScalableIcon'
 
 type TimelineNode = {
   id: string
-  type: 'message' | 'branch'
   label: string
   meta: string
   preview: string
+  role: Message['role']
   depth: number
   timestamp?: number
-  messageId?: string
+  messageId: string
   forkMessageId?: string
   branchPosition?: number
   branchCount?: number
-  active?: boolean
+  branchLabel?: string
+  activeBranch?: boolean
   children: TimelineNode[]
   branchChoices?: BranchChoice[]
 }
@@ -33,6 +34,13 @@ type BranchChoice = {
   position: number
   messageId?: string
   timestamp: number
+}
+
+type BranchContext = {
+  forkMessageId: string
+  branchPosition: number
+  branchCount: number
+  activeBranch: boolean
 }
 
 type RollTimelineDrawerProps = {
@@ -57,22 +65,18 @@ export default function RollTimelineDrawer({ session, open, onClose }: RollTimel
 
   const activateNode = useCallback(
     async (node: TimelineNode) => {
-      let targetMessageId = node.messageId
-
-      if (node.type === 'branch' && node.forkMessageId && typeof node.branchPosition === 'number') {
+      if (node.forkMessageId && typeof node.branchPosition === 'number') {
         await switchForkToPosition(session.id, node.forkMessageId, node.branchPosition)
-        targetMessageId = node.messageId || node.forkMessageId
-      } else if (node.branchChoices?.length && node.messageId) {
+      }
+
+      if (node.branchChoices?.length) {
         const latest = node.branchChoices.reduce((best, item) => (item.timestamp >= best.timestamp ? item : best))
         await switchForkToPosition(session.id, node.messageId, latest.position)
-        targetMessageId = latest.messageId || node.messageId
       }
 
-      if (targetMessageId) {
-        window.setTimeout(() => {
-          void scrollActions.scrollToMessage(session.id, targetMessageId, 'center', 'smooth')
-        }, 120)
-      }
+      window.setTimeout(() => {
+        void scrollActions.scrollToMessage(session.id, node.messageId, 'center', 'smooth')
+      }, 120)
       onClose()
     },
     [onClose, session.id]
@@ -89,7 +93,7 @@ export default function RollTimelineDrawer({ session, open, onClose }: RollTimel
       ModalProps={{ keepMounted: true }}
       classes={{
         paper:
-          'bg-none box-border max-w-[90vw] w-[420px] flex flex-col gap-0 pt-[var(--mobile-safe-area-inset-top)] pb-[var(--mobile-safe-area-inset-bottom)]',
+          'bg-none box-border max-w-[94vw] w-[520px] flex flex-col gap-0 pt-[var(--mobile-safe-area-inset-top)] pb-[var(--mobile-safe-area-inset-bottom)]',
       }}
       SlideProps={language === 'ar' ? { direction: 'right' } : undefined}
       PaperProps={
@@ -112,10 +116,20 @@ export default function RollTimelineDrawer({ session, open, onClose }: RollTimel
 
       {selectedNode && (
         <div className="mx-sm my-xs rounded-md border border-solid border-chatbox-border-primary bg-chatbox-background-secondary p-sm">
-          <Flex align="center" gap="xs" mb={4}>
-            <Badge size="xs" color={selectedNode.type === 'branch' ? 'chatbox-brand' : 'gray'}>
-              {selectedNode.type === 'branch' ? t('Branch') : t('Message')}
+          <Flex align="center" gap="xs" mb={4} wrap="wrap">
+            <Badge size="xs" color={selectedNode.role === 'user' ? 'blue' : 'chatbox-brand'}>
+              {selectedNode.role}
             </Badge>
+            {selectedNode.branchLabel && (
+              <Badge size="xs" variant="light">
+                {selectedNode.branchLabel}
+              </Badge>
+            )}
+            {selectedNode.branchCount && (
+              <Badge size="xs" variant="light">
+                {selectedNode.branchCount} paths
+              </Badge>
+            )}
             <Text size="xs" c="chatbox-tertiary" lineClamp={1}>
               {selectedNode.meta}
             </Text>
@@ -131,7 +145,7 @@ export default function RollTimelineDrawer({ session, open, onClose }: RollTimel
 
       <ScrollArea className="flex-1">
         {nodes.length > 0 ? (
-          <div className="py-xs">
+          <div className="py-sm pr-xs">
             {nodes.map((node) => (
               <TimelineNodeView
                 key={node.id}
@@ -161,7 +175,6 @@ function TimelineNodeView(props: {
   const { node, selectedId, onSelect, onActivate } = props
   const selected = selectedId === node.id
   const hasChildren = node.children.length > 0
-  const icon = node.type === 'branch' ? IconGitBranch : IconMessage
 
   return (
     <div>
@@ -170,18 +183,15 @@ function TimelineNodeView(props: {
           onClick={() => onSelect(node.id)}
           onDoubleClick={() => onActivate(node)}
           className={[
-            'w-full box-border text-left px-sm py-xxs transition-colors',
+            'relative w-full box-border text-left px-sm py-xxs transition-colors',
             selected ? 'bg-chatbox-background-brand-secondary' : 'hover:bg-chatbox-background-gray-secondary',
           ].join(' ')}
-          style={{ paddingInlineStart: 12 + node.depth * 16 }}
+          style={{ paddingInlineStart: 16 + node.depth * 30 }}
         >
           <Flex align="center" gap="xs" className="min-w-0">
-            <ScalableIcon
-              icon={icon}
-              size={15}
-              className={node.type === 'branch' ? 'text-chatbox-tint-brand' : 'text-chatbox-tint-secondary'}
-            />
-            <Text size="xs" fw={node.type === 'branch' ? 600 : 500} lineClamp={1} className="min-w-0 flex-1">
+            {node.depth > 0 && <span className="h-px w-3 shrink-0 bg-chatbox-border-primary" />}
+            <MessageMarker node={node} selected={selected} />
+            <Text size="xs" fw={node.role === 'user' ? 600 : 500} lineClamp={1} className="min-w-0 flex-1">
               {node.label}
             </Text>
             {node.branchCount && (
@@ -189,21 +199,21 @@ function TimelineNodeView(props: {
                 {node.branchCount}
               </Badge>
             )}
-            {node.active && (
+            {node.activeBranch && (
               <Badge size="xs" color="chatbox-brand" variant="light">
                 Current
               </Badge>
             )}
           </Flex>
           {node.preview && (
-            <Text size="11px" c="chatbox-tertiary" lineClamp={1} mt={2} className="min-w-0">
+            <Text size="11px" c="chatbox-tertiary" lineClamp={1} mt={2} className="min-w-0 pl-xl">
               {node.preview}
             </Text>
           )}
         </UnstyledButton>
       </Tooltip>
       {hasChildren && (
-        <div className="border-0 border-l border-solid border-chatbox-border-primary ml-md">
+        <div className="border-0 border-l border-solid border-chatbox-border-primary" style={{ marginInlineStart: 25 + node.depth * 30 }}>
           {node.children.map((child) => (
             <TimelineNodeView
               key={child.id}
@@ -219,71 +229,106 @@ function TimelineNodeView(props: {
   )
 }
 
+function MessageMarker({ node, selected }: { node: TimelineNode; selected: boolean }) {
+  const roleClass =
+    node.role === 'assistant'
+      ? 'rounded-full bg-chatbox-tint-brand border-chatbox-tint-brand'
+      : node.role === 'user'
+        ? 'rounded-[3px] bg-chatbox-background-primary border-chatbox-tint-secondary'
+        : 'rotate-45 rounded-[2px] bg-chatbox-background-secondary border-chatbox-border-primary'
+  return (
+    <span
+      className={[
+        'h-[18px] w-[18px] shrink-0 border-2 border-solid shadow-sm',
+        roleClass,
+        selected ? 'ring-2 ring-chatbox-brand ring-offset-1 ring-offset-chatbox-background-primary' : '',
+      ].join(' ')}
+    />
+  )
+}
+
 function buildTimelineNodes(session: Session): TimelineNode[] {
   const messages = getAllMessageList(session)
   if (messages.length === 0) {
     return []
   }
-  return buildPath(session, messages, 0, new Set<string>())
+  return buildMessagePath(session, messages, 0, 0, undefined, new Set<string>())
 }
 
-function buildPath(session: Session, messages: Message[], depth: number, visitedForks: Set<string>): TimelineNode[] {
-  const nodes: TimelineNode[] = []
-  for (let index = 0; index < messages.length; index += 1) {
-    const message = messages[index]
-    const fork = session.messageForksHash?.[message.id]
-    const node: TimelineNode = {
-      id: `message:${message.id}:${depth}`,
-      type: 'message',
-      label: labelForMessage(message),
-      meta: metaForMessage(message),
-      preview: previewForMessage(message),
-      depth,
-      timestamp: message.timestamp,
-      messageId: message.id,
-      children: [],
-    }
+function buildMessagePath(
+  session: Session,
+  messages: Message[],
+  index: number,
+  depth: number,
+  branchContext: BranchContext | undefined,
+  visitedForks: Set<string>
+): TimelineNode[] {
+  if (index >= messages.length) {
+    return []
+  }
 
-    if (fork && fork.lists.length > 1 && !visitedForks.has(message.id)) {
-      const nextVisited = new Set(visitedForks)
-      nextVisited.add(message.id)
-      const currentTail = messages.slice(index + 1)
-      const branches = fork.lists.map((list, branchIndex) => {
-        const branchMessages = branchIndex === fork.position ? currentTail : list.messages
-        const firstMessage = branchMessages[0]
-        const latestTimestamp = latestMessageTimestamp(branchMessages) ?? fork.createdAt
-        const branchNode: TimelineNode = {
-          id: `branch:${message.id}:${list.id}:${branchIndex}`,
-          type: 'branch',
-          label: `Branch ${branchIndex + 1} / ${fork.lists.length}`,
-          meta: `${formatDate(latestTimestamp)} · ${branchMessages.length} messages`,
-          preview: previewForMessages(branchMessages),
-          depth: depth + 1,
-          timestamp: latestTimestamp,
-          messageId: firstMessage?.id ?? message.id,
+  const message = messages[index]
+  const fork = session.messageForksHash?.[message.id]
+  const node = createMessageNode(message, depth, branchContext)
+
+  if (fork && fork.lists.length > 1 && !visitedForks.has(message.id)) {
+    const nextVisited = new Set(visitedForks)
+    nextVisited.add(message.id)
+    const currentTail = messages.slice(index + 1)
+    const branchPaths = fork.lists.flatMap((list, branchIndex) => {
+      const branchMessages = branchIndex === fork.position ? currentTail : list.messages
+      const branchPath = buildMessagePath(
+        session,
+        branchMessages,
+        0,
+        depth + 1,
+        {
           forkMessageId: message.id,
           branchPosition: branchIndex,
           branchCount: fork.lists.length,
-          active: branchIndex === fork.position,
-          children: buildPath(session, branchMessages, depth + 2, nextVisited),
-        }
-        return branchNode
-      })
+          activeBranch: branchIndex === fork.position,
+        },
+        nextVisited
+      )
+      if (branchPath[0]) {
+        branchPath[0].branchLabel = `Branch ${branchIndex + 1}`
+      }
+      return branchPath
+    })
 
-      node.branchCount = fork.lists.length
-      node.branchChoices = branches.map((branch) => ({
-        position: branch.branchPosition ?? 0,
-        messageId: branch.messageId,
-        timestamp: branch.timestamp ?? fork.createdAt,
-      }))
-      node.children = branches
-      nodes.push(node)
-      return nodes
-    }
-
-    nodes.push(node)
+    node.branchCount = fork.lists.length
+    node.branchChoices = fork.lists.map((list, branchIndex) => {
+      const branchMessages = branchIndex === fork.position ? currentTail : list.messages
+      return {
+        position: branchIndex,
+        messageId: branchMessages[0]?.id,
+        timestamp: latestMessageTimestamp(branchMessages) ?? fork.createdAt,
+      }
+    })
+    node.children = branchPaths
+    return [node]
   }
-  return nodes
+
+  node.children = buildMessagePath(session, messages, index + 1, depth, branchContext, visitedForks)
+  return [node]
+}
+
+function createMessageNode(message: Message, depth: number, branchContext?: BranchContext): TimelineNode {
+  return {
+    id: ['message', message.id, depth, branchContext?.forkMessageId ?? 'root', branchContext?.branchPosition ?? 'current'].join(':'),
+    label: labelForMessage(message),
+    meta: metaForMessage(message, branchContext),
+    preview: previewForMessage(message),
+    role: message.role,
+    depth,
+    timestamp: message.timestamp,
+    messageId: message.id,
+    forkMessageId: branchContext?.forkMessageId,
+    branchPosition: branchContext?.branchPosition,
+    branchCount: branchContext?.branchCount,
+    activeBranch: branchContext?.activeBranch,
+    children: [],
+  }
 }
 
 function flattenNodes(nodes: TimelineNode[]): TimelineNode[] {
@@ -296,19 +341,13 @@ function labelForMessage(message: Message) {
   return text ? `${role}: ${text}` : role
 }
 
-function metaForMessage(message: Message) {
-  return [formatDate(message.timestamp), message.model, message.aiProvider].filter(Boolean).join(' · ')
+function metaForMessage(message: Message, branchContext?: BranchContext) {
+  const branchMeta = branchContext ? `Branch ${branchContext.branchPosition + 1} / ${branchContext.branchCount}` : undefined
+  return [branchMeta, formatDate(message.timestamp), message.model, message.aiProvider].filter(Boolean).join(' - ')
 }
 
 function previewForMessage(message: Message) {
   return trimPreview(getMessageText(message, true, false))
-}
-
-function previewForMessages(messages: Message[]) {
-  if (messages.length === 0) {
-    return 'Empty branch'
-  }
-  return trimPreview(messages.map((message) => getMessageText(message, true, false)).filter(Boolean).join('\n\n'))
 }
 
 function trimPreview(text: string) {

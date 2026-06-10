@@ -6,7 +6,7 @@ import platform from '../platform'
 void (async () => {
   try {
     const settings = await initSettingsStore()
-    if (!settings.allowReportingAndTracking) {
+    if (!settings?.allowReportingAndTracking) {
       return
     }
 

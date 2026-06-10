@@ -5,7 +5,7 @@ import { getSettings } from '../store-node'
 
 function initSentry() {
   const settings = getSettings()
-  if (!settings.allowReportingAndTracking) {
+  if (!settings?.allowReportingAndTracking) {
     return
   }
 

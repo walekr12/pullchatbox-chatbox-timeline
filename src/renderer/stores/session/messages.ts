@@ -7,7 +7,7 @@ import {
   ChatboxAIAPIError,
   NetworkError,
 } from '@shared/models/errors'
-import { createMessage, type Message, type Session } from '@shared/types'
+import { createMessage, type Message, type MessageEditVersion } from '@shared/types'
 import { v4 as uuidv4 } from 'uuid'
 import { countMessageWords, getMessageText } from '@shared/utils/message'
 import { createModelDependencies } from '@/adapters'
@@ -81,138 +81,65 @@ export async function modifyMessage(
     return
   }
 
-  const editForkPatch = buildUserEditForkPatch(session, updated)
-  if (editForkPatch) {
-    await chatStore.updateSessionWithMessages(sessionId, (currentSession) => {
-      if (!currentSession) {
-        return currentSession
-      }
-      return {
-        ...currentSession,
-        ...editForkPatch,
-      }
-    })
-    return
-  }
-
-  await chatStore.updateMessage(sessionId, updated.id, updated)
+  await chatStore.updateMessage(sessionId, updated.id, appendUserEditVersion(session, updated))
 }
 
 
-type UserEditForkResult = {
-  messages: Message[]
-  forkMessageId: string
-  forkEntry: NonNullable<Session['messageForksHash']>[string]
-}
-
-function buildUserEditForkPatch(session: Session, updated: Message): Partial<Session> | null {
-  const rootResult = buildUserEditForkResult(session, session.messages, updated)
-  if (rootResult) {
-    return {
-      messages: rootResult.messages,
-      messageForksHash: {
-        ...(session.messageForksHash ?? {}),
-        [rootResult.forkMessageId]: rootResult.forkEntry,
-      },
-    }
-  }
-
-  if (!session.threads?.length) {
-    return null
-  }
-
-  let editResult: UserEditForkResult | null = null
-  const threads = session.threads.map((thread) => {
-    if (editResult) {
-      return thread
-    }
-    const result = buildUserEditForkResult(session, thread.messages, updated)
-    if (!result) {
-      return thread
-    }
-    editResult = result
-    return {
-      ...thread,
-      messages: result.messages,
-    }
-  })
-
-  if (!editResult) {
-    return null
-  }
-
-  return {
-    threads,
-    messageForksHash: {
-      ...(session.messageForksHash ?? {}),
-      [editResult.forkMessageId]: editResult.forkEntry,
-    },
-  }
-}
-
-function buildUserEditForkResult(
-  session: Session,
-  messages: Message[],
-  updated: Message
-): UserEditForkResult | null {
+function appendUserEditVersion(session: { messages: Message[]; threads?: { messages: Message[] }[] }, updated: Message) {
   if (updated.role !== 'user') {
-    return null
+    return updated
   }
 
-  const editIndex = messages.findIndex((message) => message.id === updated.id)
-  if (editIndex <= 0) {
-    return null
-  }
+  const original = findSessionMessage(session, updated.id)
 
-  const original = messages[editIndex]
   if (original.role !== 'user' || !hasMessageContentChanged(original, updated)) {
-    return null
+    return updated
   }
-
-  const forkMessageId = messages[editIndex - 1].id
-  const storedMessages = messages.slice(editIndex)
-  if (storedMessages.length === 0) {
-    return null
-  }
-
-  const existingFork = session.messageForksHash?.[forkMessageId]
-  const forkEntry = existingFork ?? {
-    position: 0,
-    lists: [
-      {
-        id: 'fork_list_' + uuidv4(),
-        messages: [],
-      },
-    ],
-    createdAt: Date.now(),
-  }
-
-  const storedListId = forkEntry.lists[forkEntry.position]?.id ?? 'fork_list_' + uuidv4()
-  const lists = forkEntry.lists.map((list, index) =>
-    index === forkEntry.position
-      ? {
-          id: storedListId,
-          messages: storedMessages,
-        }
-      : list
-  )
-  const nextPosition = lists.length
 
   return {
-    messages: messages.slice(0, editIndex).concat(updated),
-    forkMessageId,
-    forkEntry: {
-      ...forkEntry,
-      position: nextPosition,
-      lists: [
-        ...lists,
-        {
-          id: 'fork_list_' + uuidv4(),
-          messages: [],
-        },
-      ],
-    },
+    ...updated,
+    editVersions: appendDistinctEditVersion(original.editVersions ?? [], createEditVersion(original)),
   }
+}
+
+function findSessionMessage(session: { messages: Message[]; threads?: { messages: Message[] }[] }, messageId: string) {
+  const rootMessage = session.messages.find((message) => message.id === messageId)
+  if (rootMessage) {
+    return rootMessage
+  }
+  for (const thread of session.threads ?? []) {
+    const threadMessage = thread.messages.find((message) => message.id === messageId)
+    if (threadMessage) {
+      return threadMessage
+    }
+  }
+  return { role: 'system', contentParts: [] } as Message
+}
+
+function createEditVersion(message: Message): MessageEditVersion {
+  return {
+    id: `message_edit_${uuidv4()}`,
+    createdAt: Date.now(),
+    timestamp: message.timestamp,
+    files: message.files,
+    links: message.links,
+    contentParts: message.contentParts,
+  }
+}
+
+function appendDistinctEditVersion(versions: MessageEditVersion[], nextVersion: MessageEditVersion) {
+  if (versions.some((version) => hasSameEditVersionContent(version, nextVersion))) {
+    return versions
+  }
+  return [...versions, nextVersion]
+}
+
+function hasSameEditVersionContent(a: MessageEditVersion, b: MessageEditVersion) {
+  return (
+    JSON.stringify(a.files ?? []) === JSON.stringify(b.files ?? []) &&
+    JSON.stringify(a.links ?? []) === JSON.stringify(b.links ?? []) &&
+    JSON.stringify(a.contentParts ?? []) === JSON.stringify(b.contentParts ?? [])
+  )
 }
 
 function hasMessageContentChanged(original: Message, updated: Message) {

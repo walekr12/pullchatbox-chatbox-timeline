@@ -14,8 +14,9 @@ const { uuidQueue, uuidv4Mock } = vi.hoisted(() => {
   return { uuidQueue: queue, uuidv4Mock: mock }
 })
 
-const { updateSessionWithMessages, useSessionMock, getSessionMock } = vi.hoisted(() => ({
+const { updateSessionWithMessages, updateMessageMock, useSessionMock, getSessionMock } = vi.hoisted(() => ({
   updateSessionWithMessages: vi.fn(),
+  updateMessageMock: vi.fn(),
   useSessionMock: vi.fn(),
   getSessionMock: vi.fn(),
 }))
@@ -55,6 +56,7 @@ vi.mock('uuid', () => ({
 
 vi.mock('./chatStore', () => ({
   updateSessionWithMessages,
+  updateMessage: updateMessageMock,
   updateSession: vi.fn(),
   getSession: getSessionMock,
   useSession: useSessionMock,
@@ -152,11 +154,99 @@ beforeEach(() => {
   uuidQueue.length = 0
   uuidv4Mock.mockClear()
   updateSessionWithMessages.mockReset()
+  updateMessageMock.mockReset()
   useSessionMock.mockReset()
   getSessionMock.mockReset()
 })
 
 describe('fork actions', () => {
+  test('modifyMessage records a user edit version without creating a branch', async () => {
+    uuidQueue.push('edit-version-1')
+    const user = {
+      ...makeMessage('user-1', 'user'),
+      contentParts: [{ type: 'text' as const, text: 'old prompt' }],
+    }
+    const assistant = {
+      ...makeMessage('assistant-1', 'assistant'),
+      contentParts: [{ type: 'text' as const, text: 'old answer' }],
+    }
+    const session: Session = {
+      id: 'session-edit-1',
+      name: 'Test',
+      messages: [user, assistant],
+    }
+    const updatedUser = {
+      ...user,
+      contentParts: [{ type: 'text' as const, text: 'new prompt' }],
+    }
+    let persistedMessage: Message | undefined
+
+    getSessionMock.mockResolvedValue(session)
+    updateMessageMock.mockImplementation(async (_, __, message) => {
+      persistedMessage = message
+    })
+
+    await sessionActions.modifyMessage(session.id, updatedUser, true)
+
+    expect(updateSessionWithMessages).not.toHaveBeenCalled()
+    expect(updateMessageMock).toHaveBeenCalledWith(session.id, user.id, expect.any(Object))
+    expect(persistedMessage?.contentParts).toEqual(updatedUser.contentParts)
+    expect(persistedMessage?.editVersions).toHaveLength(1)
+    expect(persistedMessage?.editVersions?.[0].contentParts).toEqual(user.contentParts)
+  })
+
+  test('rerolling an edited user prompt branches at the previous message with the previous prompt version', async () => {
+    uuidQueue.push('fork-1', 'fork-2')
+    const pivot = {
+      ...makeMessage('pivot', 'assistant'),
+      contentParts: [{ type: 'text' as const, text: 'before edit' }],
+    }
+    const editedUser = {
+      ...makeMessage('user-1', 'user'),
+      contentParts: [{ type: 'text' as const, text: 'new prompt' }],
+      editVersions: [
+        {
+          id: 'version-1',
+          createdAt: 1,
+          contentParts: [{ type: 'text' as const, text: 'old prompt' }],
+        },
+      ],
+    }
+    const oldAnswer = {
+      ...makeMessage('assistant-1', 'assistant'),
+      contentParts: [{ type: 'text' as const, text: 'old answer' }],
+    }
+    const session: Session = {
+      id: 'session-edit-2',
+      name: 'Test',
+      messages: [pivot, editedUser, oldAnswer],
+    }
+    const snapshot = cloneSession(session)
+    let updated: Session | undefined
+
+    getSessionMock.mockResolvedValue(session)
+    updateSessionWithMessages.mockImplementation(async (_, updater) => {
+      const result = updater(session)
+      updated = result as Session
+      return result
+    })
+    const runGenerateMore = vi.fn().mockResolvedValue(undefined)
+
+    await sessionActions.regenerateInNewFork(session.id, editedUser, { runGenerateMore })
+
+    expect(session).toEqual(snapshot)
+    expect(updated?.messages).toEqual([pivot, editedUser])
+    const fork = updated?.messageForksHash?.[pivot.id]
+    expect(fork).toBeDefined()
+    expect(fork?.position).toBe(1)
+    expect(fork?.lists[0].messages).toEqual([
+      expect.objectContaining({ id: editedUser.id, contentParts: [{ type: 'text', text: 'old prompt' }] }),
+      oldAnswer,
+    ])
+    expect(fork?.lists[1].messages).toEqual([])
+    expect(runGenerateMore).toHaveBeenCalledWith(session.id, editedUser.id)
+  })
+
   test('createNewFork moves trailing messages into a new branch', async () => {
     uuidQueue.push('id-1', 'id-2', 'id-3')
     const pivot = makeMessage('pivot', 'user')

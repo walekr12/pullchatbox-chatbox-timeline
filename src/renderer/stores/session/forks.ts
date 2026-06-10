@@ -43,6 +43,29 @@ export async function createNewFork(sessionId: string, forkMessageId: string) {
 }
 
 /**
+ * Create a branch only when rerolling an edited user prompt.
+ *
+ * Plain editing keeps the current conversation intact. When the user then rerolls,
+ * the old route must include the previous prompt version plus the old downstream
+ * messages, so the fork point is the message before the edited prompt.
+ */
+export async function createForkForEditedUserReroll(sessionId: string, userMessageId: string) {
+  await chatStore.updateSessionWithMessages(sessionId, (session) => {
+    if (!session) {
+      throw new Error('Session not found')
+    }
+    const patch = buildEditedUserRerollForkPatch(session, userMessageId)
+    if (!patch) {
+      return session
+    }
+    return {
+      ...session,
+      ...patch,
+    }
+  })
+}
+
+/**
  * Switch between fork branches
  */
 export async function switchFork(sessionId: string, forkMessageId: string, direction: 'next' | 'prev') {
@@ -325,6 +348,125 @@ function buildCreateForkPatch(session: Session, forkMessageId: string): Partial<
       }
     }
   )
+}
+
+type EditedUserRerollForkResult = {
+  messages: Message[]
+  forkMessageId: string
+  forkEntry: MessageForkEntry
+}
+
+function buildEditedUserRerollForkPatch(session: Session, userMessageId: string): Partial<Session> | null {
+  const rootResult = createEditedUserRerollForkInMessages(session, session.messages, userMessageId)
+  if (rootResult) {
+    return {
+      messages: rootResult.messages,
+      messageForksHash: computeNextMessageForksHash(session.messageForksHash, rootResult.forkMessageId, rootResult.forkEntry),
+    }
+  }
+
+  if (!session.threads?.length) {
+    return null
+  }
+
+  let updatedForkHash: Session['messageForksHash'] | undefined
+  let changed = false
+  const updatedThreads = session.threads.map((thread) => {
+    if (changed) {
+      return thread
+    }
+    const result = createEditedUserRerollForkInMessages(session, thread.messages, userMessageId)
+    if (!result) {
+      return thread
+    }
+    changed = true
+    updatedForkHash = computeNextMessageForksHash(session.messageForksHash, result.forkMessageId, result.forkEntry)
+    return {
+      ...thread,
+      messages: result.messages,
+    }
+  })
+
+  if (!changed) {
+    return null
+  }
+
+  return {
+    threads: updatedThreads,
+    messageForksHash: updatedForkHash,
+  }
+}
+
+function createEditedUserRerollForkInMessages(
+  session: Session,
+  messages: Message[],
+  userMessageId: string
+): EditedUserRerollForkResult | null {
+  const userMessageIndex = messages.findIndex((message) => message.id === userMessageId)
+  if (userMessageIndex <= 0) {
+    return null
+  }
+
+  const userMessage = messages[userMessageIndex]
+  const previousVersion = userMessage.editVersions?.[userMessage.editVersions.length - 1]
+  if (userMessage.role !== 'user' || !previousVersion) {
+    return null
+  }
+
+  const forkMessageId = messages[userMessageIndex - 1].id
+  const forkEntry = session.messageForksHash?.[forkMessageId] ?? {
+    position: 0,
+    lists: [
+      {
+        id: `fork_list_${uuidv4()}`,
+        messages: [],
+      },
+    ],
+    createdAt: Date.now(),
+  }
+  const restoredOldUserMessage = restoreEditedUserVersion(userMessage, previousVersion)
+  const oldBranchMessages = [restoredOldUserMessage, ...messages.slice(userMessageIndex + 1)]
+  const storedListId = forkEntry.lists[forkEntry.position]?.id ?? `fork_list_${uuidv4()}`
+  const lists = forkEntry.lists.map((list, index) =>
+    index === forkEntry.position
+      ? {
+          id: storedListId,
+          messages: oldBranchMessages,
+        }
+      : list
+  )
+  const nextPosition = lists.length
+  const updatedFork: MessageForkEntry = {
+    ...forkEntry,
+    position: nextPosition,
+    lists: [
+      ...lists,
+      {
+        id: `fork_list_${uuidv4()}`,
+        messages: [],
+      },
+    ],
+  }
+  const updatedMessages = messages.slice(0, userMessageIndex + 1)
+
+  return {
+    messages: updatedMessages,
+    forkMessageId,
+    forkEntry: updatedFork,
+  }
+}
+
+function restoreEditedUserVersion(
+  message: Message,
+  version: NonNullable<Message['editVersions']>[number]
+): Message {
+  return {
+    ...message,
+    files: version.files,
+    links: version.links,
+    contentParts: version.contentParts,
+    timestamp: version.timestamp,
+  }
 }
 
 function buildDeleteForkPatch(session: Session, forkMessageId: string): Partial<Session> | null {

@@ -21,6 +21,7 @@ type TimelineNode = {
   depth: number
   timestamp?: number
   messageId: string
+  editVersions?: Message['editVersions']
   forkMessageId?: string
   branchPosition?: number
   branchCount?: number
@@ -137,6 +138,15 @@ export default function ConversationBranchesDrawer({ session, open, onClose }: C
           <Text size="xs" c="chatbox-secondary" mt={4} className="whitespace-pre-wrap break-words">
             {selectedNode.preview || t('No preview')}
           </Text>
+          {!!selectedNode.editVersions?.length && (
+            <Flex gap={6} mt="xs" className="overflow-x-auto pb-1" wrap="nowrap">
+              {selectedNode.editVersions.map((version, index) => (
+                <Badge key={version.id} size="sm" variant="light" className="max-w-[220px] shrink-0">
+                  {`V${index + 1}: ${previewForEditVersion(version) || t('No preview')}`}
+                </Badge>
+              ))}
+            </Flex>
+          )}
         </div>
       )}
 
@@ -194,6 +204,11 @@ function TimelineNodeView(props: {
             {node.branchCount && (
               <Badge size="xs" variant="light">
                 {node.branchCount}
+              </Badge>
+            )}
+            {!!node.editVersions?.length && (
+              <Badge size="xs" variant="light">
+                {node.editVersions.length} versions
               </Badge>
             )}
             {node.activeBranch && (
@@ -316,6 +331,7 @@ function createMessageNode(message: Message, depth: number, branchContext?: Bran
     depth,
     timestamp: message.timestamp,
     messageId: message.id,
+    editVersions: message.editVersions,
     forkMessageId: branchContext?.forkMessageId,
     branchPosition: branchContext?.branchPosition,
     branchCount: branchContext?.branchCount,
@@ -341,6 +357,15 @@ function metaForMessage(message: Message, branchContext?: BranchContext) {
 
 function previewForMessage(message: Message) {
   return trimPreview(getMessageText(message, true, false))
+}
+
+function previewForEditVersion(version: NonNullable<Message['editVersions']>[number]) {
+  return trimPreview(
+    version.contentParts
+      .map((part) => (part.type === 'text' ? part.text : ''))
+      .filter(Boolean)
+      .join(' ')
+  )
 }
 
 function trimPreview(text: string) {

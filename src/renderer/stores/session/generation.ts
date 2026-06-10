@@ -3,7 +3,7 @@ import type { AttachmentResolver } from '@shared/context/types'
 import { type CompactionPoint, createMessage, type Message, type SessionSettings } from '@shared/types'
 import * as chatStore from '../chatStore'
 import { createAttachmentResolver } from './attachment-resolver'
-import { createNewFork, findMessageLocation } from './forks'
+import { createForkForEditedUserReroll, createNewFork, findMessageLocation } from './forks'
 import { insertMessageAfter } from './messages'
 import { orchestrateGeneration } from './orchestration'
 import { orchestratePictureGeneration } from './pictures'
@@ -40,8 +40,19 @@ export async function generateMore(sessionId: string, msgId: string) {
 }
 
 export async function generateMoreInNewFork(sessionId: string, msgId: string) {
-  await createNewFork(sessionId, msgId)
+  await createForkForReroll(sessionId, msgId)
   await generateMore(sessionId, msgId)
+}
+
+async function createForkForReroll(sessionId: string, msgId: string) {
+  const session = await chatStore.getSession(sessionId)
+  const location = session ? findMessageLocation(session, msgId) : null
+  const message = location?.list[location.index]
+  if (message?.role === 'user' && message.editVersions?.length && location.index > 0) {
+    await createForkForEditedUserReroll(sessionId, msgId)
+    return
+  }
+  await createNewFork(sessionId, msgId)
 }
 
 type GenerateMoreFn = (sessionId: string, msgId: string) => Promise<void>
@@ -62,7 +73,7 @@ export async function regenerateInNewFork(
     return
   }
   if (msg.role === 'user') {
-    await createNewFork(sessionId, msg.id)
+    await createForkForReroll(sessionId, msg.id)
     return runGenerateMore(sessionId, msg.id)
   }
 

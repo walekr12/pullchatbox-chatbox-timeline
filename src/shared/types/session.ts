@@ -186,6 +186,15 @@ const MessageUsageSchema = z.object({
   cachedInputTokens: z.number().optional().catch(undefined),
 })
 
+export const MessageEditVersionSchema = z.object({
+  id: z.string(),
+  createdAt: z.number(),
+  timestamp: z.number().optional(),
+  files: z.array(MessageFileSchema).optional(),
+  links: z.array(MessageLinkSchema).optional(),
+  contentParts: MessageContentPartsSchema,
+})
+
 export const MessageSchema = z.object({
   id: z.string(),
   role: z.nativeEnum(MessageRoleEnum),
@@ -215,6 +224,7 @@ export const MessageSchema = z.object({
   tokenCalculatedAt: TokenCalculatedAtSchema,
   updatedAt: z.number().optional(),
   isSummary: z.boolean().optional(), // Marks message as a compaction summary
+  editVersions: z.array(MessageEditVersionSchema).optional(),
 })
 
 // Compaction point schema (for context management)
@@ -305,6 +315,7 @@ export type MessageToolCallPart<Args = unknown, Result = unknown> = z.infer<type
   result?: Result
 }
 export type MessageContentParts = z.infer<typeof MessageContentPartsSchema>
+export type MessageEditVersion = z.infer<typeof MessageEditVersionSchema>
 export type StreamTextResult = z.infer<typeof StreamTextResultSchema>
 export type ToolUseScope = z.infer<typeof ToolUseScopeSchema>
 export type ModelProvider = z.infer<typeof ModelProviderSchema>

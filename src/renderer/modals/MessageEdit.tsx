@@ -117,19 +117,20 @@ const MessageEditModal = ({
     onClose()
   }, [onClose])
 
-  const onSave = () => {
+  const onSave = async () => {
     if (!msg) {
       return
     }
-    void modifyMessage(sessionId, msg, true)
+    await modifyMessage(sessionId, msg, true)
     onClose()
   }
-  const onSaveAndReply = () => {
+  const onSaveAndReply = async () => {
     if (!msg) {
       return
     }
-    onSave()
-    void generateMoreInNewFork(sessionId, msg.id)
+    await modifyMessage(sessionId, msg, true)
+    onClose()
+    await generateMoreInNewFork(sessionId, msg.id)
   }
 
   const onContentPartInput = (index: number, text: string) => {
